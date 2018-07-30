@@ -15,6 +15,7 @@ import com.example.mustafa.armeasure_sample.rendering.BackgroundRenderer;
 import com.example.mustafa.armeasure_sample.rendering.ObjectRenderer;
 import com.example.mustafa.armeasure_sample.rendering.PlaneRenderer;
 import com.example.mustafa.armeasure_sample.rendering.PointCloudRenderer;
+import com.example.mustafa.armeasure_sample.rendering.RectanglePolygonRenderer;
 import com.example.mustafa.armeasure_sample.rendering.ShaderUtil;
 import com.google.ar.core.Anchor;
 import com.google.ar.core.Camera;
@@ -23,6 +24,7 @@ import com.google.ar.core.HitResult;
 import com.google.ar.core.Plane;
 import com.google.ar.core.Point;
 import com.google.ar.core.PointCloud;
+import com.google.ar.core.Pose;
 import com.google.ar.core.Session;
 import com.google.ar.core.Trackable;
 import com.google.ar.core.TrackingState;
@@ -36,6 +38,7 @@ import java.util.ArrayList;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
+import javax.vecmath.Vector3f;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -55,12 +58,15 @@ public class MainActivity extends AppCompatActivity {
     private final BackgroundRenderer backgroundRenderer = new BackgroundRenderer();
     private final PlaneRenderer planeRenderer = new PlaneRenderer();
     private final PointCloudRenderer pointCloudRenderer = new PointCloudRenderer();
+    private RectanglePolygonRenderer lineRenderer;
 
     private final ObjectRenderer touchPlaceObject = new ObjectRenderer();
 
 
     // Temporary matrix allocated here to reduce number of allocations for each frame.
     private final float[] anchorMatrix = new float[16];
+    private final float[] projmtx = new float[16];
+    private final float[] viewmtx = new float[16];
 
 
     // Anchors created from taps used for object placing with a given color.
@@ -74,6 +80,9 @@ public class MainActivity extends AppCompatActivity {
         }
     }
     private final ArrayList<ColoredAnchor> anchors = new ArrayList<>();
+
+    private int viewWidth = 0;
+    private int viewHeight = 0;
 
     @SuppressLint("ClickableViewAccessibility")
     @Override
@@ -99,6 +108,7 @@ public class MainActivity extends AppCompatActivity {
                 // Prepare the rendering objects. This involves reading shaders, so may throw an IOException.
                 try {
                     // Create the texture and pass it to ARCore session to be filled during update().
+                    lineRenderer = new RectanglePolygonRenderer();
                     backgroundRenderer.createOnGlThread(MainActivity.this);
                     planeRenderer.createOnGlThread(MainActivity.this, "models/trigrid.png");
                     pointCloudRenderer.createOnGlThread(MainActivity.this);
@@ -114,6 +124,8 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onSurfaceChanged(GL10 unused, int width, int height) {
+                viewWidth = width;
+                viewHeight = height;
                 displayRotationHelper.onSurfaceChanged(width, height);
                 GLES20.glViewport(0, 0, width, height);
             }
@@ -151,11 +163,9 @@ public class MainActivity extends AppCompatActivity {
                     }
 
                     // Get projection matrix.
-                    float[] projmtx = new float[16];
                     camera.getProjectionMatrix(projmtx, 0, 0.1f, 100.0f);
 
                     // Get camera matrix and draw.
-                    float[] viewmtx = new float[16];
                     camera.getViewMatrix(viewmtx, 0);
 
                     // Compute lighting from average intensity of the image.
@@ -188,7 +198,8 @@ public class MainActivity extends AppCompatActivity {
 
                     // Visualize anchors created by touch.
                     float scaleFactor = 0.1f;
-                    for (ColoredAnchor coloredAnchor : anchors) {
+                    for (int i = 0; i < anchors.size(); i++) {
+                        ColoredAnchor coloredAnchor = anchors.get(i);
                         if (coloredAnchor.anchor.getTrackingState() != TrackingState.TRACKING) {
                             continue;
                         }
@@ -200,6 +211,11 @@ public class MainActivity extends AppCompatActivity {
                         touchPlaceObject.updateModelMatrix(anchorMatrix, scaleFactor);
                         touchPlaceObject.draw(viewmtx, projmtx, colorCorrectionRgba, coloredAnchor.color);
 
+                        if(anchors.size()> 1){//DRAWING LINES
+                            if(i > 0 && anchors.get(i - 1) != null){
+                                drawLine(anchors.get(i - 1).anchor.getPose(), anchors.get(i).anchor.getPose(), viewmtx, projmtx);
+                            }
+                        }
                     }
 
                 } catch (Throwable t) {
@@ -219,13 +235,15 @@ public class MainActivity extends AppCompatActivity {
                 // Check if any plane was hit, and if it was hit inside the plane polygon
                 Trackable trackable = hit.getTrackable();
                 // Creates an anchor if a plane or an oriented point was hit.
+                if(anchors.size() >= 20){
+                    return;
+                }
                 if ((trackable instanceof Plane
                         && ((Plane) trackable).isPoseInPolygon(hit.getHitPose())
                         && (PlaneRenderer.calculateDistanceToPlane(hit.getHitPose(), camera.getPose()) > 0))
                         || (trackable instanceof Point
                         && ((Point) trackable).getOrientationMode()
-                        == Point.OrientationMode.ESTIMATED_SURFACE_NORMAL)
-                        && anchors.size() <= 20) {//if points bigger than 20 we are not allow more points
+                        == Point.OrientationMode.ESTIMATED_SURFACE_NORMAL)) {//if points bigger than 20 we are not allow more points
 
                     // Hits are sorted by depth. Consider only closest hit on a plane or oriented point.
                     // Cap the number of objects created. This avoids overloading both the
@@ -250,11 +268,30 @@ public class MainActivity extends AppCompatActivity {
                     // Adding an Anchor tells ARCore that it should track this position in
                     // space. This anchor is created on the Plane to place the 3D model
                     // in the correct position relative both to the world and to the plane.
-                    anchors.add(new ColoredAnchor(hit.createAnchor(), objColor));
+                    ColoredAnchor newAnchor = new ColoredAnchor(hit.createAnchor(), objColor);
+                    anchors.add(newAnchor);
                     break;
                 }
             }
         }
+    }
+
+    private void drawLine(Pose pose0, Pose pose1, float[] viewmtx, float[] projmtx) {
+        float lineWidth = 0.002f;
+        float lineWidthH = lineWidth / viewHeight * viewWidth;
+        lineRenderer.setVerts(
+                new Vector3f(pose0.tx() - lineWidth, pose0.ty() + lineWidthH, pose0.tz() - lineWidth),
+                new Vector3f(pose0.tx() + lineWidth, pose0.ty() + lineWidthH, pose0.tz() + lineWidth),
+                new Vector3f(pose1.tx() + lineWidth, pose1.ty() + lineWidthH, pose1.tz() + lineWidth),
+                new Vector3f(pose1.tx() - lineWidth, pose1.ty() + lineWidthH, pose1.tz() - lineWidth),
+
+                new Vector3f(pose0.tx() - lineWidth, pose0.ty() - lineWidthH, pose0.tz() - lineWidth),
+                new Vector3f(pose0.tx() + lineWidth, pose0.ty() - lineWidthH, pose0.tz() + lineWidth),
+                new Vector3f(pose1.tx() + lineWidth, pose1.ty() - lineWidthH, pose1.tz() + lineWidth),
+                new Vector3f(pose1.tx() - lineWidth, pose1.ty() - lineWidthH, pose1.tz() - lineWidth)
+        );
+
+        lineRenderer.draw(viewmtx, projmtx);
     }
 
 
