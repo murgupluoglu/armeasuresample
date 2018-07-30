@@ -1,6 +1,7 @@
 package com.example.mustafa.armeasure_sample.rendering;
 
 import android.content.Context;
+import android.graphics.Color;
 import android.opengl.GLES20;
 import android.util.Log;
 
@@ -79,5 +80,25 @@ public class ShaderUtil {
             }
             return sb.toString();
         }
+    }
+
+    /**
+     * Converts given hex value to float array for opengl usage
+     * @param argb hex color
+     * @return float array
+     */
+    public static float[] hexToColor(String argb){
+        int color_base = Color.parseColor(argb);
+        int red = Color.red(color_base);
+        int green = Color.green(color_base);
+        int blue = Color.blue(color_base);
+        int alpha = Color.alpha(color_base);
+
+        return new float[]{
+                (red / 255f),
+                (green / 255f),
+                (blue / 255f),
+                (alpha / 255f)
+        };
     }
 }

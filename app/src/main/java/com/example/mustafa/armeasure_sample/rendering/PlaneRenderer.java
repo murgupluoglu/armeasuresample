@@ -355,8 +355,7 @@ public class PlaneRenderer {
             // Get transformed Y axis of plane's coordinate system.
             plane.getCenterPose().getTransformedAxis(1, 1.0f, normal, 0);
 
-            updatePlaneParameters(
-                    planeMatrix, plane.getExtentX(), plane.getExtentZ(), plane.getPolygon());
+            updatePlaneParameters(planeMatrix, plane.getExtentX(), plane.getExtentZ(), plane.getPolygon());
 
             // Get plane index. Keep a map to assign same indices to same planes.
             Integer planeIndex = planeIndexMap.get(plane);

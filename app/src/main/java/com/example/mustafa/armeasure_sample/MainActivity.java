@@ -1,31 +1,35 @@
 package com.example.mustafa.armeasure_sample;
 
+import android.annotation.SuppressLint;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.MotionEvent;
 
-import com.blankj.utilcode.constant.PermissionConstants;
-import com.blankj.utilcode.util.PermissionUtils;
 import com.example.mustafa.armeasure_sample.helpers.DisplayRotationHelper;
 import com.example.mustafa.armeasure_sample.helpers.SnackbarHelper;
+import com.example.mustafa.armeasure_sample.helpers.TapHelper;
 import com.example.mustafa.armeasure_sample.rendering.BackgroundRenderer;
+import com.example.mustafa.armeasure_sample.rendering.ObjectRenderer;
 import com.example.mustafa.armeasure_sample.rendering.PlaneRenderer;
 import com.example.mustafa.armeasure_sample.rendering.PointCloudRenderer;
+import com.example.mustafa.armeasure_sample.rendering.ShaderUtil;
 import com.google.ar.core.Anchor;
 import com.google.ar.core.Camera;
 import com.google.ar.core.Frame;
+import com.google.ar.core.HitResult;
 import com.google.ar.core.Plane;
+import com.google.ar.core.Point;
 import com.google.ar.core.PointCloud;
 import com.google.ar.core.Session;
+import com.google.ar.core.Trackable;
 import com.google.ar.core.TrackingState;
 import com.google.ar.core.exceptions.CameraNotAvailableException;
 import com.google.ar.core.exceptions.UnavailableApkTooOldException;
 import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException;
-import com.google.ar.core.exceptions.UnavailableDeviceNotCompatibleException;
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException;
-import com.google.ar.core.exceptions.UnavailableUserDeclinedInstallationException;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -36,16 +40,23 @@ import javax.microedition.khronos.opengles.GL10;
 public class MainActivity extends AppCompatActivity {
 
     private static final String TAG = MainActivity.class.getSimpleName();
+    private static final float[] DEFAULT_COLOR = ShaderUtil.hexToColor("#000000");
+    private static final float[] BLUE_COLOR = new float[] {66.0f, 133.0f, 244.0f, 255.0f};
+    private static final float[] GREEN_COLOR = new float[] {139.0f, 195.0f, 74.0f, 255.0f};
 
-    private final SnackbarHelper messageSnackbarHelper = new SnackbarHelper();
 
     private GLSurfaceView surfaceView;
+
     private DisplayRotationHelper displayRotationHelper;
+    private TapHelper tapHelper;
+    private final SnackbarHelper messageSnackbarHelper = new SnackbarHelper();
 
     private Session session;
     private final BackgroundRenderer backgroundRenderer = new BackgroundRenderer();
     private final PlaneRenderer planeRenderer = new PlaneRenderer();
     private final PointCloudRenderer pointCloudRenderer = new PointCloudRenderer();
+
+    private final ObjectRenderer touchPlaceObject = new ObjectRenderer();
 
 
     // Temporary matrix allocated here to reduce number of allocations for each frame.
@@ -64,6 +75,7 @@ public class MainActivity extends AppCompatActivity {
     }
     private final ArrayList<ColoredAnchor> anchors = new ArrayList<>();
 
+    @SuppressLint("ClickableViewAccessibility")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -71,9 +83,11 @@ public class MainActivity extends AppCompatActivity {
 
         surfaceView = findViewById(R.id.surfaceview);
         displayRotationHelper = new DisplayRotationHelper(/*context=*/ this);
+        tapHelper = new TapHelper(/*context=*/ this);
 
 
         // Set up renderer.
+        surfaceView.setOnTouchListener(tapHelper);
         surfaceView.setPreserveEGLContextOnPause(true);
         surfaceView.setEGLContextClientVersion(2);
         surfaceView.setEGLConfigChooser(8, 8, 8, 8, 16, 0); // Alpha used for plane blending.
@@ -89,12 +103,9 @@ public class MainActivity extends AppCompatActivity {
                     planeRenderer.createOnGlThread(MainActivity.this, "models/trigrid.png");
                     pointCloudRenderer.createOnGlThread(MainActivity.this);
 
-                    //virtualObject.createOnGlThread(/*context=*/ this, "models/andy.obj", "models/andy.png");
-                    //virtualObject.setMaterialProperties(0.0f, 2.0f, 0.5f, 6.0f);
+                    touchPlaceObject.createOnGlThread(MainActivity.this, "models/andy.obj", "models/andy.png");
+                    //touchPlaceObject.setMaterialProperties(0.0f, 2.0f, 0.5f, 6.0f);
 
-                    //virtualObjectShadow.createOnGlThread(this, "models/andy_shadow.obj", "models/andy_shadow.png");
-                    //virtualObjectShadow.setBlendMode(BlendMode.Shadow);
-                    //virtualObjectShadow.setMaterialProperties(1.0f, 0.0f, 0.0f, 1.0f);
 
                 } catch (IOException e) {
                     Log.e(TAG, "Failed to read an asset file", e);
@@ -129,7 +140,7 @@ public class MainActivity extends AppCompatActivity {
                     Camera camera = frame.getCamera();
 
                     // Handle one tap per frame.
-                    //handleTap(frame, camera);
+                    handleTap(frame, camera);
 
                     // Draw background.
                     backgroundRenderer.draw(frame);
@@ -176,7 +187,7 @@ public class MainActivity extends AppCompatActivity {
                     planeRenderer.drawPlanes(session.getAllTrackables(Plane.class), camera.getDisplayOrientedPose(), projmtx);
 
                     // Visualize anchors created by touch.
-                    float scaleFactor = 1.0f;
+                    float scaleFactor = 0.1f;
                     for (ColoredAnchor coloredAnchor : anchors) {
                         if (coloredAnchor.anchor.getTrackingState() != TrackingState.TRACKING) {
                             continue;
@@ -186,10 +197,9 @@ public class MainActivity extends AppCompatActivity {
                         coloredAnchor.anchor.getPose().toMatrix(anchorMatrix, 0);
 
                         // Update and draw the model and its shadow.
-                        //virtualObject.updateModelMatrix(anchorMatrix, scaleFactor);
-                        //virtualObjectShadow.updateModelMatrix(anchorMatrix, scaleFactor);
-                        //virtualObject.draw(viewmtx, projmtx, colorCorrectionRgba, coloredAnchor.color);
-                        //virtualObjectShadow.draw(viewmtx, projmtx, colorCorrectionRgba, coloredAnchor.color);
+                        touchPlaceObject.updateModelMatrix(anchorMatrix, scaleFactor);
+                        touchPlaceObject.draw(viewmtx, projmtx, colorCorrectionRgba, coloredAnchor.color);
+
                     }
 
                 } catch (Throwable t) {
@@ -199,6 +209,52 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         surfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+    }
+
+    // Handle only one tap per frame, as taps are usually low frequency compared to frame rate.
+    private void handleTap(Frame frame, Camera camera) {
+        MotionEvent tap = tapHelper.poll();
+        if (tap != null && camera.getTrackingState() == TrackingState.TRACKING) {
+            for (HitResult hit : frame.hitTest(tap)) {
+                // Check if any plane was hit, and if it was hit inside the plane polygon
+                Trackable trackable = hit.getTrackable();
+                // Creates an anchor if a plane or an oriented point was hit.
+                if ((trackable instanceof Plane
+                        && ((Plane) trackable).isPoseInPolygon(hit.getHitPose())
+                        && (PlaneRenderer.calculateDistanceToPlane(hit.getHitPose(), camera.getPose()) > 0))
+                        || (trackable instanceof Point
+                        && ((Point) trackable).getOrientationMode()
+                        == Point.OrientationMode.ESTIMATED_SURFACE_NORMAL)
+                        && anchors.size() <= 20) {//if points bigger than 20 we are not allow more points
+
+                    // Hits are sorted by depth. Consider only closest hit on a plane or oriented point.
+                    // Cap the number of objects created. This avoids overloading both the
+                    // rendering system and ARCore.
+                    //if (anchors.size() >= 20) {
+                    //    anchors.get(0).anchor.detach();
+                    //    anchors.remove(0);
+                    //}
+
+                    // Assign a color to the object for rendering based on the trackable type
+                    // this anchor attached to. For AR_TRACKABLE_POINT, it's blue color, and
+                    // for AR_TRACKABLE_PLANE, it's green color.
+                    float[] objColor;
+                    if (trackable instanceof Point) {
+                        objColor = BLUE_COLOR;
+                    } else if (trackable instanceof Plane) {
+                        objColor = GREEN_COLOR;
+                    } else {
+                        objColor = DEFAULT_COLOR;
+                    }
+
+                    // Adding an Anchor tells ARCore that it should track this position in
+                    // space. This anchor is created on the Plane to place the 3D model
+                    // in the correct position relative both to the world and to the plane.
+                    anchors.add(new ColoredAnchor(hit.createAnchor(), objColor));
+                    break;
+                }
+            }
+        }
     }
 
 
