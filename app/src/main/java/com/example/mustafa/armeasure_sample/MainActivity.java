@@ -3,6 +3,7 @@ package com.example.mustafa.armeasure_sample;
 import android.annotation.SuppressLint;
 import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
+import android.opengl.Matrix;
 import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
@@ -73,10 +74,12 @@ public class MainActivity extends AppCompatActivity {
     private static class ColoredAnchor {
         public final Anchor anchor;
         public final float[] color;
+        public float[] modelViewProjectionMatrix;
 
-        public ColoredAnchor(Anchor a, float[] color4f) {
+        public ColoredAnchor(Anchor a, float[] color4f, float[] modelViewProjectionMatrix) {
             this.anchor = a;
             this.color = color4f;
+            this.modelViewProjectionMatrix = modelViewProjectionMatrix;
         }
     }
     private final ArrayList<ColoredAnchor> anchors = new ArrayList<>();
@@ -113,7 +116,7 @@ public class MainActivity extends AppCompatActivity {
                     planeRenderer.createOnGlThread(MainActivity.this, "models/trigrid.png");
                     pointCloudRenderer.createOnGlThread(MainActivity.this);
 
-                    touchPlaceObject.createOnGlThread(MainActivity.this, "models/andy.obj", "models/andy.png");
+                    touchPlaceObject.createOnGlThread(MainActivity.this, "models/pin.obj", "models/pin_texture.png");
                     //touchPlaceObject.setMaterialProperties(0.0f, 2.0f, 0.5f, 6.0f);
 
 
@@ -197,7 +200,7 @@ public class MainActivity extends AppCompatActivity {
                     planeRenderer.drawPlanes(session.getAllTrackables(Plane.class), camera.getDisplayOrientedPose(), projmtx);
 
                     // Visualize anchors created by touch.
-                    float scaleFactor = 0.1f;
+                    float scaleFactor = 0.001f;
                     for (int i = 0; i < anchors.size(); i++) {
                         ColoredAnchor coloredAnchor = anchors.get(i);
                         if (coloredAnchor.anchor.getTrackingState() != TrackingState.TRACKING) {
@@ -210,6 +213,7 @@ public class MainActivity extends AppCompatActivity {
                         // Update and draw the model and its shadow.
                         touchPlaceObject.updateModelMatrix(anchorMatrix, scaleFactor);
                         touchPlaceObject.draw(viewmtx, projmtx, colorCorrectionRgba, coloredAnchor.color);
+                        anchors.get(i).modelViewProjectionMatrix = touchPlaceObject.getModelViewProjectionMatrix();
 
                         if(anchors.size()> 1){//DRAWING LINES
                             if(i > 0 && anchors.get(i - 1) != null){
@@ -228,6 +232,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // Handle only one tap per frame, as taps are usually low frequency compared to frame rate.
+    private boolean isTouchAnyObject = false;
     private void handleTap(Frame frame, Camera camera) {
         MotionEvent tap = tapHelper.poll();
         if (tap != null && camera.getTrackingState() == TrackingState.TRACKING) {
@@ -265,15 +270,31 @@ public class MainActivity extends AppCompatActivity {
                         objColor = DEFAULT_COLOR;
                     }
 
-                    // Adding an Anchor tells ARCore that it should track this position in
-                    // space. This anchor is created on the Plane to place the 3D model
-                    // in the correct position relative both to the world and to the plane.
-                    ColoredAnchor newAnchor = new ColoredAnchor(hit.createAnchor(), objColor);
-                    anchors.add(newAnchor);
+                    if(anchors.size() >= 3){
+                        for (int i = 0; i < anchors.size(); i++) {
+                            if (isMVPMatrixHitMotionEvent(anchors.get(i).modelViewProjectionMatrix, tap)) {
+                                Log.e("Touched", "SAME OBJECT == " + i);
+                                addAnchor(anchors.get(i).anchor, objColor);
+                                isTouchAnyObject = true;
+                            }
+                        }
+                    }
+
+                    if(!isTouchAnyObject)
+                        addAnchor(hit.createAnchor(), objColor);
+
+                    isTouchAnyObject = false;
                     break;
                 }
             }
         }
+    }
+    private void addAnchor(Anchor anchor, float[] objColor){
+        // Adding an Anchor tells ARCore that it should track this position in
+        // space. This anchor is created on the Plane to place the 3D model
+        // in the correct position relative both to the world and to the plane.
+        ColoredAnchor newAnchor = new ColoredAnchor(anchor, objColor, new float[16]);
+        anchors.add(newAnchor);
     }
 
     private void drawLine(Pose pose0, Pose pose1, float[] viewmtx, float[] projmtx) {
@@ -292,6 +313,23 @@ public class MainActivity extends AppCompatActivity {
         );
 
         lineRenderer.draw(viewmtx, projmtx);
+    }
+
+    // according to cube.obj, cube diameter = 0.02f
+    private final float cubeHitAreaRadius = .08f;
+    private final float[] centerVertexOfCube = {0f, 0f, 0f, 1};
+    private final float[] vertexResult = new float[4];
+    private boolean isMVPMatrixHitMotionEvent(float[] ModelViewProjectionMatrix, MotionEvent event) {
+        if (event == null) {
+            return false;
+        }
+        Matrix.multiplyMV(vertexResult, 0, ModelViewProjectionMatrix, 0, centerVertexOfCube, 0);
+        float radius = (viewWidth / 2) * (cubeHitAreaRadius / vertexResult[3]);
+        Log.e("radius: " , String.valueOf(radius));
+        float dx = event.getX() - (viewWidth / 2) * (1 + vertexResult[0] / vertexResult[3]);
+        float dy = event.getY() - (viewHeight / 2) * (1 - vertexResult[1] / vertexResult[3]);
+        double distance = Math.sqrt(dx * dx + dy * dy);
+        return distance < radius;
     }
 
 

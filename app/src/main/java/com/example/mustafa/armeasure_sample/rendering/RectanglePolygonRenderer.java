@@ -41,7 +41,7 @@ public class RectanglePolygonRenderer {
     }; // order to draw vertex
 
     //float color[] = {0.63671875f, 0.76953125f, 0.22265625f, 1.0f};
-    float color[] = ShaderUtil.hexToColor("#ffc24aFF");
+    float color[] = ShaderUtil.hexToColor("#f44336FF");
 
     public void setVerts(Vector3f v1,
                          Vector3f v2,
