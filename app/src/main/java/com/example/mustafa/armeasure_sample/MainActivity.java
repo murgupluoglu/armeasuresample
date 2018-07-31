@@ -36,7 +36,7 @@ import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException;
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException;
 
 import java.io.IOException;
-import java.text.DecimalFormat;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 
 import javax.microedition.khronos.egl.EGLConfig;
@@ -121,7 +121,7 @@ public class MainActivity extends AppCompatActivity {
                     planeRenderer.createOnGlThread(MainActivity.this, "models/trigrid.png");
                     pointCloudRenderer.createOnGlThread(MainActivity.this);
 
-                    touchPlaceObject.createOnGlThread(MainActivity.this, "models/cube.obj", "models/cube_texture.png");
+                    touchPlaceObject.createOnGlThread(MainActivity.this, "models/pin.obj", "models/pin_texture.png");
                     //touchPlaceObject.setMaterialProperties(0.0f, 2.0f, 0.5f, 6.0f);
 
 
@@ -205,7 +205,7 @@ public class MainActivity extends AppCompatActivity {
                     planeRenderer.drawPlanes(session.getAllTrackables(Plane.class), camera.getDisplayOrientedPose(), projmtx);
 
                     // Visualize anchors created by touch.
-                    float scaleFactor = 0.8f;
+                    float scaleFactor = 0.08f;
                     ArrayList<Vector2f> polygons = new ArrayList<>();
                     for (int i = 0; i < anchors.size(); i++) {
                         ColoredAnchor coloredAnchor = anchors.get(i);
@@ -225,20 +225,19 @@ public class MainActivity extends AppCompatActivity {
                         if(anchors.size()> 1){//DRAWING LINES
                             if(i > 0 && anchors.get(i - 1) != null){
                                 drawLine(anchors.get(i - 1).anchor.getPose(), anchors.get(i).anchor.getPose(), viewmtx, projmtx);
-                                float distanceCm = ((int) (getDistance(anchors.get(i - 1).anchor.getPose(), anchors.get(i).anchor.getPose()) * 1000)) / 10.0f;
-                                Log.e("distance: " , String.valueOf(distanceCm));
+                                double distanceCm = getDistance(anchors.get(i - 1).anchor.getPose(), anchors.get(i).anchor.getPose());
+                                Log.e("distance: " , String.valueOf(meterToCm(distanceCm)));
                             }
                         }
                     }
-                    Log.e("polygon array size: " , String.valueOf(polygons.size()));
-                    if(polygons.size() > 3){
-                        final float cm2 = (getPolygonArea(polygons) * 1000) / 10;
-                        Log.e("polygon size: " , String.valueOf(cm2));
+                    if(polygons.size() > 2){
+                        final float m2 = getPolygonArea(polygons);
+                        Log.e("polygon size: " , String.valueOf(meterToCm(m2)));
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                if(cm2 > 0)
-                                    textView2.setText(cm2 + " cm2");
+                                if(m2 > 0.0d)
+                                    textView2.setText(meterToCm(m2) + " cm2");
                             }
                         });
                     }
@@ -340,11 +339,34 @@ public class MainActivity extends AppCompatActivity {
 
     private float getPolygonArea(ArrayList<Vector2f> ploygon)
     {
-        float s = ploygon.get(0).y*(ploygon.get(ploygon.size()-1).x-ploygon.get(1).x);
+        float s = (ploygon.get(0).x + ploygon.get(ploygon.size()-1).x) * (ploygon.get(0).y + ploygon.get(ploygon.size()-1).y);
         for (int i = 1; i < ploygon.size(); i++) {
-            s += ploygon.get(i).y*(ploygon.get(i-1).x - ploygon.get((i+1)%ploygon.size()).x);
+            s += (ploygon.get(i).x + ploygon.get(i-1).x) * (ploygon.get(i).y + ploygon.get(i-1).y);
         }
         return Math.abs(s/2);
+    }
+
+    private double polygonArea(int[] X, int[] Y, int numPoints)
+    {
+        double area = 0;         // Accumulates area in the loop
+        int j = numPoints-1;  // The last vertex is the 'previous' one to the first
+
+        for (int i = 0; i < numPoints; i++) {
+            area = area +  (X[j]+X[i]) * (Y[j]-Y[i]);
+            j = i;  //j is previous vertex to i
+        }
+        return area/2;
+    }
+
+    private double roundTo2DecimalPlaces(double value) {
+        if (value != Double.NEGATIVE_INFINITY && value != Double.POSITIVE_INFINITY  && value != Double.NaN) {
+            return new BigDecimal(value).setScale(2, BigDecimal.ROUND_HALF_UP).doubleValue();
+        }
+        return 0.0;
+    }
+
+    private double meterToCm(double meter){
+        return meter * 100f;
     }
 
 

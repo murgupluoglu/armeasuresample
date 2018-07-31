@@ -30,7 +30,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
-        <activity android:name=".MainActivity" />
+        <activity
+            android:screenOrientation="portrait"
+            android:name=".MainActivity" />
 
 
         <!-- This tag indicates that this application requires ARCore.  This results in the Google Play
