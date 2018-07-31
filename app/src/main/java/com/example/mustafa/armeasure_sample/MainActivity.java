@@ -8,6 +8,7 @@ import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.MotionEvent;
+import android.widget.TextView;
 
 import com.example.mustafa.armeasure_sample.helpers.DisplayRotationHelper;
 import com.example.mustafa.armeasure_sample.helpers.SnackbarHelper;
@@ -35,10 +36,12 @@ import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException;
 import com.google.ar.core.exceptions.UnavailableSdkTooOldException;
 
 import java.io.IOException;
+import java.text.DecimalFormat;
 import java.util.ArrayList;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
+import javax.vecmath.Vector2f;
 import javax.vecmath.Vector3f;
 
 public class MainActivity extends AppCompatActivity {
@@ -50,6 +53,7 @@ public class MainActivity extends AppCompatActivity {
 
 
     private GLSurfaceView surfaceView;
+    private TextView textView2;
 
     private DisplayRotationHelper displayRotationHelper;
     private TapHelper tapHelper;
@@ -94,6 +98,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         surfaceView = findViewById(R.id.surfaceview);
+        textView2 = findViewById(R.id.textView2);
         displayRotationHelper = new DisplayRotationHelper(/*context=*/ this);
         tapHelper = new TapHelper(/*context=*/ this);
 
@@ -116,7 +121,7 @@ public class MainActivity extends AppCompatActivity {
                     planeRenderer.createOnGlThread(MainActivity.this, "models/trigrid.png");
                     pointCloudRenderer.createOnGlThread(MainActivity.this);
 
-                    touchPlaceObject.createOnGlThread(MainActivity.this, "models/pin.obj", "models/pin_texture.png");
+                    touchPlaceObject.createOnGlThread(MainActivity.this, "models/cube.obj", "models/cube_texture.png");
                     //touchPlaceObject.setMaterialProperties(0.0f, 2.0f, 0.5f, 6.0f);
 
 
@@ -200,12 +205,14 @@ public class MainActivity extends AppCompatActivity {
                     planeRenderer.drawPlanes(session.getAllTrackables(Plane.class), camera.getDisplayOrientedPose(), projmtx);
 
                     // Visualize anchors created by touch.
-                    float scaleFactor = 0.001f;
+                    float scaleFactor = 0.8f;
+                    ArrayList<Vector2f> polygons = new ArrayList<>();
                     for (int i = 0; i < anchors.size(); i++) {
                         ColoredAnchor coloredAnchor = anchors.get(i);
                         if (coloredAnchor.anchor.getTrackingState() != TrackingState.TRACKING) {
                             continue;
                         }
+                        polygons.add(new Vector2f(coloredAnchor.anchor.getPose().getTranslation()[0], coloredAnchor.anchor.getPose().getTranslation()[1]));
                         // Get the current pose of an Anchor in world space. The Anchor pose is updated
                         // during calls to session.update() as ARCore refines its estimate of the world.
                         coloredAnchor.anchor.getPose().toMatrix(anchorMatrix, 0);
@@ -218,8 +225,22 @@ public class MainActivity extends AppCompatActivity {
                         if(anchors.size()> 1){//DRAWING LINES
                             if(i > 0 && anchors.get(i - 1) != null){
                                 drawLine(anchors.get(i - 1).anchor.getPose(), anchors.get(i).anchor.getPose(), viewmtx, projmtx);
+                                float distanceCm = ((int) (getDistance(anchors.get(i - 1).anchor.getPose(), anchors.get(i).anchor.getPose()) * 1000)) / 10.0f;
+                                Log.e("distance: " , String.valueOf(distanceCm));
                             }
                         }
+                    }
+                    Log.e("polygon array size: " , String.valueOf(polygons.size()));
+                    if(polygons.size() > 3){
+                        final float cm2 = (getPolygonArea(polygons) * 1000) / 10;
+                        Log.e("polygon size: " , String.valueOf(cm2));
+                        runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if(cm2 > 0)
+                                    textView2.setText(cm2 + " cm2");
+                            }
+                        });
                     }
 
                 } catch (Throwable t) {
@@ -229,6 +250,14 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         surfaceView.setRenderMode(GLSurfaceView.RENDERMODE_CONTINUOUSLY);
+    }
+
+    public static double Round(double value, int places) {
+        if (places < 0) throw new IllegalArgumentException();
+        long factor = (long) Math.pow(10, places);
+        value = value * factor;
+        long tmp = Math.round(value);
+        return (double) tmp / factor;
     }
 
     // Handle only one tap per frame, as taps are usually low frequency compared to frame rate.
@@ -270,18 +299,24 @@ public class MainActivity extends AppCompatActivity {
                         objColor = DEFAULT_COLOR;
                     }
 
+                    Anchor touchAnchor = hit.createAnchor();
                     if(anchors.size() >= 3){
                         for (int i = 0; i < anchors.size(); i++) {
-                            if (isMVPMatrixHitMotionEvent(anchors.get(i).modelViewProjectionMatrix, tap)) {
+                            if (getDistance(anchors.get(i).anchor.getPose(), touchAnchor.getPose()) < 0.02f) {
                                 Log.e("Touched", "SAME OBJECT == " + i);
-                                addAnchor(anchors.get(i).anchor, objColor);
+                                //addAnchor(anchors.get(i).anchor, objColor);
+                                touchAnchor = anchors.get(i).anchor;
                                 isTouchAnyObject = true;
                             }
                         }
                     }
 
-                    if(!isTouchAnyObject)
+                    if(isTouchAnyObject){
+                        addAnchor(touchAnchor, objColor);
+                    }else{
                         addAnchor(hit.createAnchor(), objColor);
+                    }
+
 
                     isTouchAnyObject = false;
                     break;
@@ -296,6 +331,22 @@ public class MainActivity extends AppCompatActivity {
         ColoredAnchor newAnchor = new ColoredAnchor(anchor, objColor, new float[16]);
         anchors.add(newAnchor);
     }
+
+    private double getDistance(Pose pose0, Pose pose1) {
+        Vector3f distanceVector = new Vector3f();
+        distanceVector.sub(new Vector3f(pose0.getTranslation()), new Vector3f(pose1.getTranslation()));
+        return distanceVector.length();
+    }
+
+    private float getPolygonArea(ArrayList<Vector2f> ploygon)
+    {
+        float s = ploygon.get(0).y*(ploygon.get(ploygon.size()-1).x-ploygon.get(1).x);
+        for (int i = 1; i < ploygon.size(); i++) {
+            s += ploygon.get(i).y*(ploygon.get(i-1).x - ploygon.get((i+1)%ploygon.size()).x);
+        }
+        return Math.abs(s/2);
+    }
+
 
     private void drawLine(Pose pose0, Pose pose1, float[] viewmtx, float[] projmtx) {
         float lineWidth = 0.002f;
@@ -325,10 +376,11 @@ public class MainActivity extends AppCompatActivity {
         }
         Matrix.multiplyMV(vertexResult, 0, ModelViewProjectionMatrix, 0, centerVertexOfCube, 0);
         float radius = (viewWidth / 2) * (cubeHitAreaRadius / vertexResult[3]);
-        Log.e("radius: " , String.valueOf(radius));
+
         float dx = event.getX() - (viewWidth / 2) * (1 + vertexResult[0] / vertexResult[3]);
         float dy = event.getY() - (viewHeight / 2) * (1 - vertexResult[1] / vertexResult[3]);
         double distance = Math.sqrt(dx * dx + dy * dy);
+        Log.e("distance: " , String.valueOf(distance) + " ---- radius: " + radius);
         return distance < radius;
     }
 
